@@ -1,0 +1,1 @@
+https://github.com/osixia/docker-openldap/issues/150
