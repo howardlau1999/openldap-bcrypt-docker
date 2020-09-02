@@ -1,8 +1,8 @@
-FROM osixia/openldap:1.3.0
+FROM osixia/openldap:1.4.0
 
 ENV PREFIX=/opt
 ENV OPENLDAP_INSTALL_DIR=${PREFIX}/ldap
-ENV OPENLDAP_VERSION=2.4.48
+ENV OPENLDAP_VERSION=2.4.50
 
 # Temporary install deps
 RUN apt-get update
