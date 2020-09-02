@@ -1,49 +1,42 @@
-FROM osixia/openldap:1.4.0
+########################
+# Build Stage
+########################
+FROM debian:buster-slim as builder
 
-ENV PREFIX=/opt
-ENV OPENLDAP_INSTALL_DIR=${PREFIX}/ldap
-ENV OPENLDAP_VERSION=2.4.50
+## Configuration
+########################
+ARG OPENLDAP_BUILD_VERSION=OPENLDAP_REL_ENG_2_4_50
+ARG OPENLDAP_BCRYPT_VERSION=master
+ARG BCRYPT_DEFAULT_WORKFACTOR=8
+ARG MAKE_BUILD_JOBS=8
 
-# Temporary install deps
-RUN apt-get update
-RUN apt-get install -y wget build-essential git libtool libdb-dev groff groff-base
-
-# Build tmp OpenLDAP
-RUN mkdir -p ${PREFIX}
-WORKDIR ${PREFIX}
-RUN wget ftp://ftp.openldap.org/pub/OpenLDAP/openldap-release/openldap-${OPENLDAP_VERSION}.tgz
-RUN tar xzf openldap-${OPENLDAP_VERSION}.tgz
-RUN mv openldap-${OPENLDAP_VERSION} ldap
-WORKDIR ${OPENLDAP_INSTALL_DIR}
-RUN ./configure --prefix=${PREFIX} --enable-modules
+## Prepare
+########################
+# Install build tools
+RUN apt-get update && apt-get -y install apt-utils git man-db libdb5.3-dev libssl-dev autoconf build-essential libtool libldap2-dev
+# Create output directory
+RUN mkdir /libtocopy
+# Build openldap
+RUN git clone --branch ${OPENLDAP_BUILD_VERSION} --depth 1 https://git.openldap.org/openldap/openldap.git openldap
+WORKDIR /openldap
+RUN ./configure --enable-modules
 RUN make depend
-RUN make
-RUN make install
+RUN make --jobs ${MAKE_BUILD_JOBS}
 
-# Build bcrypt OpenLDAP
-RUN mkdir -p ${OPENLDAP_INSTALL_DIR}/contrib/slapd-modules/passwd
-WORKDIR ${OPENLDAP_INSTALL_DIR}/contrib/slapd-modules/passwd
-RUN git clone https://github.com/wclarie/openldap-bcrypt.git bcrypt
-WORKDIR ${OPENLDAP_INSTALL_DIR}/contrib/slapd-modules/passwd/bcrypt
-RUN make
-RUN make install
+## Build BCRYPT module
+########################
+WORKDIR /openldap/contrib/slapd-modules/passwd
+RUN git clone --branch ${OPENLDAP_BCRYPT_VERSION} --depth 1 https://github.com/wclarie/openldap-bcrypt.git bcrypt
+WORKDIR /openldap/contrib/slapd-modules/passwd/bcrypt
+RUN sed -i "s/#define BCRYPT_DEFAULT_WORKFACTOR [[:digit:]]\+/#define BCRYPT_DEFAULT_WORKFACTOR $BCRYPT_DEFAULT_WORKFACTOR/g" pw-bcrypt.c
+RUN make --jobs ${MAKE_BUILD_JOBS}
+RUN cp pw-bcrypt.la .libs/pw-bcrypt.so .libs/pw-bcrypt.so.0 .libs/pw-bcrypt.so.0.0.0 /libtocopy
+WORKDIR /openldap
 
-# install BCrypt lib
-RUN cp /usr/local/libexec/openldap/pw-bcrypt.so /usr/lib/ldap/pw-bcrypt.so
-
-# Remove tmp OpenLDAP build
-RUN rm -rf ${OPENLDAP_INSTALL_DIR}
-RUN rm -rf /usr/local/libexec
-
-# Remove installed deps
-RUN apt-get remove -y wget build-essential git libtool libdb-dev groff groff-base
-RUN apt-get autoclean && \
-  rm -rf /var/lib/apt/lists/* && \
-  rm -rf /usr/share/locale/* && \
-  rm -rf /usr/share/man/* && \
-  rm -rf /usr/share/doc/*
-
-# Osixia/OpenLDAP extension
+########################
+# RUN Stage
+########################
+FROM osixia/openldap:1.4.0
+# Copy modules from build to productive image
+COPY --from=builder /libtocopy /usr/lib/ldap/
 ADD bootstrap/ldif/custom/*.ldif /container/service/slapd/assets/config/bootstrap/ldif/custom/
-
-WORKDIR /
